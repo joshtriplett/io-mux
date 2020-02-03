@@ -36,7 +36,7 @@ std::thread::spawn(move || match child.wait() {
 
 loop {
     let tagged_data = mux.read()?;
-    if let Some(tag) = tagged_data.tag {
+    if let Some(&tag) = tagged_data.tag {
         print!("{}: ", tag);
         if tag == "d" {
             break;
@@ -76,9 +76,10 @@ compile_error!("io-mux only runs on Linux");
 
 /// A `Mux` provides a single receive end and multiple send ends. Data sent to any of the send ends
 /// comes out the receive end, in order, tagged by the sender.
-pub struct Mux {
+pub struct Mux<T> {
     receive: UnixDatagram,
     tempdir: tempfile::TempDir,
+    values: Vec<T>,
     buf: Vec<u8>,
 }
 
@@ -117,21 +118,20 @@ impl io::Write for MuxSender {
 
 /// Data received through a mux, along with the tag if any.
 #[derive(Debug)]
-pub struct TaggedData<'a> {
+pub struct TaggedData<'a, T> {
     /// Data received, borrowed from the `Mux`.
     pub data: &'a [u8],
     /// Tag for the sender of this data.
-    pub tag: Option<String>,
+    pub tag: Option<&'a T>,
 }
 
-impl Mux {
+impl<T> Mux<T> {
     /// Create a new `Mux`.
     ///
     /// This will create a temporary directory for all the sockets managed by this `Mux`; dropping
     /// the `Mux` removes the temporary directory.
     pub fn new() -> io::Result<Self> {
         let tempdir = tempfile::tempdir()?;
-        std::fs::create_dir(tempdir.path().join("s"))?;
         let receive_path = tempdir.path().join("r");
         let receive = UnixDatagram::bind(&receive_path)?;
         receive.shutdown(Shutdown::Write)?;
@@ -139,6 +139,7 @@ impl Mux {
         Ok(Mux {
             receive,
             tempdir,
+            values: Vec::new(),
             buf: Vec::new(),
         })
     }
@@ -158,14 +159,9 @@ impl Mux {
 
     /// Create a new `MuxSender` with the specified `tag`. Data sent via this `MuxSender` will
     /// arrive with a tag of `Some(tag)`.
-    pub fn make_tagged_sender(&self, tag: &str) -> io::Result<MuxSender> {
-        if tag.contains(std::path::is_separator) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Failed to get exit status of process",
-            ));
-        }
-        let sender_path = self.tempdir.path().join("s").join(tag);
+    pub fn make_tagged_sender(&mut self, tag: T) -> io::Result<MuxSender> {
+        let sender_path = self.tempdir.path().join(self.values.len().to_string());
+        self.values.push(tag);
         self.config_sender(UnixDatagram::bind(&sender_path)?)
     }
 
@@ -175,7 +171,7 @@ impl Mux {
     ///
     /// Note that this provides no "EOF" indication; if no further data arrives, it will block
     /// forever. Avoid calling it after the source of the data exits.
-    pub fn read<'mux>(&'mux mut self) -> io::Result<TaggedData<'mux>> {
+    pub fn read<'mux>(&'mux mut self) -> io::Result<TaggedData<'mux, T>> {
         let next_packet_len = unsafe {
             libc::recv(
                 self.receive.as_raw_fd(),
@@ -192,10 +188,14 @@ impl Mux {
             self.buf.resize(next_packet_len, 0);
         }
         let (bytes, addr) = self.receive.recv_from(&mut self.buf)?;
-        let tag = if let Some(path) = addr.as_pathname() {
-            path.file_name().map(|s| s.to_string_lossy().into_owned())
+        let tag: Option<usize> = if let Some(path) = addr.as_pathname() {
+            path.file_name().and_then(|s| s.to_str()).and_then(|s| s.parse().ok())
         } else {
             None
+        };
+        let tag = match tag {
+            Some(i) => self.values.get(i),
+            None => None,
         };
         Ok(TaggedData {
             data: &self.buf[..bytes],
@@ -238,16 +238,16 @@ mod test {
         assert!(data1.tag.is_none());
         assert_eq!(data1.data, b"out1\n");
         let data2 = mux.read()?;
-        assert_eq!(data2.tag.as_deref(), Some("e"));
+        assert_eq!(data2.tag, Some(&"e"));
         assert_eq!(data2.data, b"err1\n");
         let data3 = mux.read()?;
         assert!(data3.tag.is_none());
         assert_eq!(data3.data, b"out2\n");
         let data4 = mux.read()?;
-        assert_eq!(data4.tag.as_deref(), Some("e"));
+        assert_eq!(data4.tag, Some(&"e"));
         assert_eq!(data4.data, b"err2\n");
         let done = mux.read()?;
-        assert_eq!(done.tag.as_deref(), Some("d"));
+        assert_eq!(done.tag, Some(&"d"));
         assert_eq!(done.data, b"Done\n");
 
         Ok(())
