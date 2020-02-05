@@ -207,7 +207,8 @@ impl Mux {
             let bytes = self.recv(self.buf, libc::MSG_PEEK)?;
             // If we filled the buffer, we may have truncated output. Retry with a bigger buffer.
             if bytes == self.buf.len() {
-                self.buf.resize(self.buf.len() * 2, 0);
+                let new_len = self.buf.len().saturating_mul(2);
+                self.buf.resize(new_len, 0);
             } else {
                 // Get the packet address, and clear it by fetching into a zero-sized buffer.
                 let (_, addr) = self.receive.recv_from(&mut [])?;
