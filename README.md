@@ -9,3 +9,8 @@ stderr, while preserving the relative order of data across both stdout and
 stderr.
 
 [Documentation](https://docs.rs/io-mux)
+
+## Portability
+
+`io-mux` uses UNIX sockets, and specific details of the implementation mean
+that it can only run on Linux.
