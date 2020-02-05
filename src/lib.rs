@@ -65,14 +65,14 @@ to have some other indication that no further output will arrive, such as the ex
 process producing output.
 */
 
+#[cfg(not(target_os = "linux"))]
+compile_error!("io-mux only runs on Linux");
+
 use std::io;
 use std::net::Shutdown;
 use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::net::UnixDatagram;
 use std::process::Stdio;
-
-#[cfg(not(target_os = "linux"))]
-compile_error!("io-mux only runs on Linux");
 
 /// A `Mux` provides a single receive end and multiple send ends. Data sent to any of the send ends
 /// comes out the receive end, in order, tagged by the sender.
