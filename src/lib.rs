@@ -169,6 +169,22 @@ impl Mux {
         self.config_sender(UnixDatagram::bind(&sender_path)?)
     }
 
+    /// Helper function to call recv on the receive socket and handle errors.
+    fn recv(&mut self, buf: &mut [u8], flags: i32) -> io::Result<usize> {
+        let ret = unsafe {
+            libc::recv(
+                self.receive.as_raw_fd(),
+                buf.as_mut_ptr() as *mut _,
+                buf.len(),
+                flags,
+            )
+        };
+        if ret == -1 {
+            return Err(io::Error::last_os_error());
+        };
+        Ok(ret as usize)
+    }
+
     /// Return the next chunk of data, together with its tag.
     ///
     /// This reuses a buffer managed by the `Mux`.
@@ -176,18 +192,7 @@ impl Mux {
     /// Note that this provides no "EOF" indication; if no further data arrives, it will block
     /// forever. Avoid calling it after the source of the data exits.
     pub fn read<'mux>(&'mux mut self) -> io::Result<TaggedData<'mux>> {
-        let next_packet_len = unsafe {
-            libc::recv(
-                self.receive.as_raw_fd(),
-                std::ptr::null_mut(),
-                0,
-                libc::MSG_PEEK | libc::MSG_TRUNC,
-            )
-        };
-        if next_packet_len == -1 {
-            return Err(io::Error::last_os_error());
-        };
-        let next_packet_len = next_packet_len as usize;
+        let next_packet_len = self.recv(&mut [], libc::MSG_PEEK | libc::MSG_TRUNC)?;
         if next_packet_len > self.buf.len() {
             self.buf.resize(next_packet_len, 0);
         }
