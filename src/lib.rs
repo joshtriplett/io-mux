@@ -252,4 +252,12 @@ mod test {
 
         Ok(())
     }
+
+    #[test]
+    fn test_path_separator() -> std::io::Result<()> {
+        let mux = Mux::new()?;
+        let result = mux.make_tagged_sender("a/b");
+        assert!(result.is_err());
+        Ok(())
+    }
 }
