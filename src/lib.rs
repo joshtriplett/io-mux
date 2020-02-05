@@ -55,8 +55,11 @@ socket for each sender. Datagram sockets support `recvfrom`, which provides the 
 sender, so `Mux::read` can use the sender address as the tag for the packet received.
 
 However, datagram sockets require reading an entire datagram with each `recvfrom` call, so
-`Mux::read` needs to find out the size of the next datagram before calling `recvfrom`. Finding the
-next datagram size requires an OS-specific mechanism, currently only implemented on Linux systems.
+`Mux::read` needs to find out the size of the next datagram before calling `recvfrom`. Linux
+supports directly asking for the next packet size using `recv` with `MSG_PEEK | MSG_TRUNC`. On
+other UNIX systems, we have to repeatedly call `recv` with `MSG_PEEK` and an increasingly large
+buffer, until we receive the entire packet, then make one more call without `MSG_PEEK` to tell the
+OS to discard it.
 
 `Mux` creates UNIX sockets within a temporary directory, removed when dropping the `Mux`.
 

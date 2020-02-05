@@ -12,5 +12,5 @@ stderr.
 
 ## Portability
 
-`io-mux` uses UNIX sockets, and specific details of the implementation mean
-that it can only run on Linux.
+`io-mux` uses UNIX sockets, so it only runs on UNIX platforms. It provides a
+more optimized implementation on Linux, but should work on any UNIX platform.
