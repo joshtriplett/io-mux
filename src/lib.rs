@@ -162,7 +162,7 @@ impl Mux {
         if tag.contains(std::path::is_separator) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Failed to get exit status of process",
+                "Tag must not contain path separator",
             ));
         }
         let sender_path = self.tempdir.path().join("s").join(tag);
