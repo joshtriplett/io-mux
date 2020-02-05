@@ -137,7 +137,9 @@ impl Mux {
         let receive_path = tempdir.path().join("r");
         let receive = UnixDatagram::bind(&receive_path)?;
 
-        // On FreeBSD this returns a `Socket is not connected` error.
+        // Shutdown writing to the receive socket, to help catch possible errors. On some targets,
+        // this generates spurious errors, such as `Socket is not connected` on FreeBSD. We don't
+        // need this shutdown for correctness, so just ignore any errors.
         let _ = receive.shutdown(Shutdown::Write);
 
         Ok(Mux {
