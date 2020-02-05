@@ -71,7 +71,7 @@ compile_error!("io-mux only runs on UNIX");
 use std::io;
 use std::net::Shutdown;
 use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
-use std::os::unix::net::UnixDatagram;
+use std::os::unix::net::{SocketAddr, UnixDatagram};
 use std::process::Stdio;
 
 const DEFAULT_BUF_SIZE: usize = 8192;
@@ -191,6 +191,31 @@ impl Mux {
         Ok(ret as usize)
     }
 
+    #[cfg(target_os = "linux")]
+    fn recv_from_full<'mux>(&'mux mut self) -> io::Result<(&'mux [u8], SocketAddr)> {
+        let next_packet_len = self.recv(&mut [], libc::MSG_PEEK | libc::MSG_TRUNC)?;
+        if next_packet_len > self.buf.len() {
+            self.buf.resize(next_packet_len, 0);
+        }
+        let (bytes, addr) = self.receive.recv_from(&mut self.buf)?;
+        Ok((&self.buf[..bytes], addr))
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn recv_from_full<'mux>(&'mux mut self) -> io::Result<(&'mux [u8], SocketAddr)> {
+        loop {
+            let bytes = self.recv(self.buf, libc::MSG_PEEK)?;
+            // If we filled the buffer, we may have truncated output. Retry with a bigger buffer.
+            if bytes == self.buf.len() {
+                self.buf.resize(self.buf.len() * 2, 0);
+            } else {
+                // Get the packet address, and clear it by fetching into a zero-sized buffer.
+                let (_, addr) = self.receive.recv_from(&mut [])?;
+                return Ok(&self.buf[..bytes], addr);
+            }
+        }
+    }
+
     /// Return the next chunk of data, together with its tag.
     ///
     /// This reuses a buffer managed by the `Mux`.
@@ -198,37 +223,13 @@ impl Mux {
     /// Note that this provides no "EOF" indication; if no further data arrives, it will block
     /// forever. Avoid calling it after the source of the data exits.
     pub fn read<'mux>(&'mux mut self) -> io::Result<TaggedData<'mux>> {
-        #[cfg(target_os = "linux")]
-        let (bytes, addr) = {
-            let next_packet_len = self.recv(&mut [], libc::MSG_PEEK | libc::MSG_TRUNC)?;
-            if next_packet_len > self.buf.len() {
-                self.buf.resize(next_packet_len, 0);
-            }
-            self.receive.recv_from(&mut self.buf)?
-        };
-
-        #[cfg(not(target_os = "linux"))]
-        let (bytes, addr) = loop {
-            let received_bytes = self.recv(self.buf, libc::MSG_PEEK)?;
-            // If we filled the buffer, we may have truncated output. Retry with a bigger buffer.
-            if received_bytes == self.buf.len() {
-                self.buf.resize(self.buf.len() * 2, 0);
-            } else {
-                // Get the packet address, and clear it by fetching into a zero-sized buffer.
-                let (_, addr) = self.receive.recv_from(&mut [])?;
-                break (received_bytes, addr);
-            }
-        };
-
+        let (data, addr) = self.recv_from_full()?;
         let tag = if let Some(path) = addr.as_pathname() {
             path.file_name().map(|s| s.to_string_lossy().into_owned())
         } else {
             None
         };
-        Ok(TaggedData {
-            data: &self.buf[..bytes],
-            tag,
-        })
+        Ok(TaggedData { data, tag })
     }
 }
 
