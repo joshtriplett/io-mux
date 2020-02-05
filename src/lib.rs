@@ -72,6 +72,7 @@ use std::io;
 use std::net::Shutdown;
 use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::net::{SocketAddr, UnixDatagram};
+use std::path::Path;
 use std::process::Stdio;
 
 const DEFAULT_BUF_SIZE: usize = 8192;
@@ -225,11 +226,10 @@ impl Mux {
     /// forever. Avoid calling it after the source of the data exits.
     pub fn read<'mux>(&'mux mut self) -> io::Result<TaggedData<'mux>> {
         let (data, addr) = self.recv_from_full()?;
-        let tag = if let Some(path) = addr.as_pathname() {
-            path.file_name().map(|s| s.to_string_lossy().into_owned())
-        } else {
-            None
-        };
+        let tag = addr
+            .as_pathname()
+            .and_then(Path::file_name)
+            .map(|s| s.to_string_lossy().into_owned());
         Ok(TaggedData { data, tag })
     }
 }
