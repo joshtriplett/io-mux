@@ -180,15 +180,9 @@ impl Mux {
     }
 
     /// Helper function to call recv on the receive socket and handle errors.
-    fn recv(&mut self, buf: &mut [u8], flags: i32) -> io::Result<usize> {
-        let ret = unsafe {
-            libc::recv(
-                self.receive.as_raw_fd(),
-                buf.as_mut_ptr() as *mut _,
-                buf.len(),
-                flags,
-            )
-        };
+    fn recv(fd: &mut UnixDatagram, buf: &mut [u8], flags: i32) -> io::Result<usize> {
+        let ret =
+            unsafe { libc::recv(fd.as_raw_fd(), buf.as_mut_ptr() as *mut _, buf.len(), flags) };
         if ret == -1 {
             return Err(io::Error::last_os_error());
         };
@@ -197,7 +191,8 @@ impl Mux {
 
     #[cfg(target_os = "linux")]
     fn recv_from_full<'mux>(&'mux mut self) -> io::Result<(&'mux [u8], SocketAddr)> {
-        let next_packet_len = self.recv(&mut [], libc::MSG_PEEK | libc::MSG_TRUNC)?;
+        let next_packet_len =
+            Mux::recv(&mut self.receive, &mut [], libc::MSG_PEEK | libc::MSG_TRUNC)?;
         if next_packet_len > self.buf.len() {
             self.buf.resize(next_packet_len, 0);
         }
@@ -208,7 +203,7 @@ impl Mux {
     #[cfg(not(target_os = "linux"))]
     fn recv_from_full<'mux>(&'mux mut self) -> io::Result<(&'mux [u8], SocketAddr)> {
         loop {
-            let bytes = self.recv(self.buf, libc::MSG_PEEK)?;
+            let bytes = Mux::recv(&mut self.receive, &mut self.buf, libc::MSG_PEEK)?;
             // If we filled the buffer, we may have truncated output. Retry with a bigger buffer.
             if bytes == self.buf.len() {
                 let new_len = self.buf.len().saturating_mul(2);
@@ -216,7 +211,7 @@ impl Mux {
             } else {
                 // Get the packet address, and clear it by fetching into a zero-sized buffer.
                 let (_, addr) = self.receive.recv_from(&mut [])?;
-                return Ok(&self.buf[..bytes], addr);
+                return Ok((&self.buf[..bytes], addr));
             }
         }
     }
