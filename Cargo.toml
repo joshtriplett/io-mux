@@ -14,5 +14,8 @@ libc = "0.2.66"
 tempfile = "3.1"
 
 [features]
+# Support building on non-Linux targets. See the portability notes in the
+# documentation before enabling this.
+experimental-unix-support = []
 # Test the portable code path, to confirm that it compiles and runs.
 test-portable = []

@@ -66,10 +66,31 @@ OS to discard it.
 Note that `Mux::read` cannot provide any indication of end-of-file. When using `Mux`, you will need
 to have some other indication that no further output will arrive, such as the exit of the child
 process producing output.
+
+# Portability
+Mux can theoretically run on any UNIX system. However, on some non-Linux systems, when the buffers
+for a UNIX socket fill up, witing to the UNIX socket may return an `ENOBUFS` error rather than
+blocking. Thus, on non-Linux systems, the process writing to a `MuxSender` may encounter an error
+if the receiving process does not process its buffers quickly enough. This does not match the
+behavior of a pipe. As this may result in surprising behavior, by default io-mux does not compile
+on non-Linux systems. If you want to use io-mux on a non-Linux system, and your use case does not
+need the same semantics as a pipe, and *in particular* it will not cause a problem in your use case
+if writing to a `MuxSender` may produce an `ENOBUFS` error if you do not read from the receive end
+quickly enough, then you can compile `io-mux` on non-Linux platforms by enabling the
+`experimental-unix-support` feature of `io-mux`.
+
+If you have another UNIX platform which blocks on writes to a UNIX datagram socket with full
+buffers, as Linux does, then please send a note to the io-mux maintainer to mark support for your
+platform as non-experimental.
 */
 
 #[cfg(not(unix))]
 compile_error!("io-mux only runs on UNIX");
+
+#[cfg(all(unix, not(target_os = "linux"), not(feature = "experimental-unix-support")))]
+compile_error!("io-mux support for non-Linux platforms is experimental.
+Please read the portability note in the io-mux documentation for more information
+and potential caveats, before enabling io-mux's experimental UNIX support.");
 
 use std::io;
 use std::net::Shutdown;
