@@ -188,7 +188,7 @@ impl Mux {
         self.config_sender(UnixDatagram::bind(&sender_path)?)
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(feature = "test-portable")))]
     fn recv_from_full<'mux>(&'mux mut self) -> io::Result<(&'mux [u8], SocketAddr)> {
         let next_packet_len = recv(&mut self.receive, &mut [], libc::MSG_PEEK | libc::MSG_TRUNC)?;
         if next_packet_len > self.buf.len() {
@@ -198,7 +198,7 @@ impl Mux {
         Ok((&self.buf[..bytes], addr))
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(all(target_os = "linux", not(feature = "test-portable"))))]
     fn recv_from_full<'mux>(&'mux mut self) -> io::Result<(&'mux [u8], SocketAddr)> {
         loop {
             let bytes = recv(&mut self.receive, &mut self.buf, libc::MSG_PEEK)?;

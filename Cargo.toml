@@ -12,3 +12,7 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 libc = "0.2.66"
 tempfile = "3.1"
+
+[features]
+# Test the portable code path, to confirm that it compiles and runs.
+test-portable = []
