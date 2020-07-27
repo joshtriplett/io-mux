@@ -103,10 +103,19 @@ const DEFAULT_BUF_SIZE: usize = 8192;
 
 /// A `Mux` provides a single receive end and multiple send ends. Data sent to any of the send ends
 /// comes out the receive end, in order, tagged by the sender.
+///
+/// `Mux` implements `AsRawFd` solely to support polling the underlying `RawFd` for data to read.
+/// Always use `Mux` to perform the actual read.
 pub struct Mux {
     receive: UnixDatagram,
     tempdir: tempfile::TempDir,
     buf: Vec<u8>,
+}
+
+impl AsRawFd for Mux {
+    fn as_raw_fd(&self) -> RawFd {
+        self.receive.as_raw_fd()
+    }
 }
 
 /// A send end of a `Mux`. You can convert a `MuxSender` to a `std::process::Stdio` for use with a
