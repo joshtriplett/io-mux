@@ -175,7 +175,18 @@ impl Mux {
     /// This will create a temporary directory for all the sockets managed by this `Mux`; dropping
     /// the `Mux` removes the temporary directory.
     pub fn new() -> io::Result<Self> {
-        let tempdir = tempfile::tempdir()?;
+        Self::new_with_tempdir(tempfile::tempdir()?)
+    }
+
+    /// Create a new `Mux`, with temporary directory under the specified path.
+    ///
+    /// This will create a temporary directory for all the sockets managed by this `Mux`; dropping
+    /// the `Mux` removes the temporary directory.
+    pub fn new_in<P: AsRef<Path>>(dir: P) -> io::Result<Self> {
+        Self::new_with_tempdir(tempfile::tempdir_in(dir)?)
+    }
+
+    fn new_with_tempdir(tempdir: tempfile::TempDir) -> io::Result<Self> {
         std::fs::create_dir(tempdir.path().join("s"))?;
         let receive_path = tempdir.path().join("r");
         let receive = UnixDatagram::bind(&receive_path)?;
@@ -266,7 +277,22 @@ mod test {
 
     #[test]
     fn test() -> std::io::Result<()> {
-        let mut mux = Mux::new()?;
+        test_with_mux(Mux::new()?)
+    }
+
+    #[test]
+    fn test_new_in() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let dir_entries = || -> std::io::Result<usize> {
+            Ok(dir.path().read_dir()?.collect::<Result<Vec<_>, _>>()?.len())
+        };
+        assert_eq!(dir_entries()?, 0);
+        let mux = Mux::new_in(dir.path())?;
+        assert_eq!(dir_entries()?, 1);
+        test_with_mux(mux)
+    }
+
+    fn test_with_mux(mut mux: Mux) -> std::io::Result<()> {
         let mut child = std::process::Command::new("sh")
             .arg("-c")
             .arg("echo out1 && echo err1 1>&2 && echo out2 && echo err2 1>&2")
