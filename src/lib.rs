@@ -152,7 +152,7 @@ impl io::Write for MuxSender {
 }
 
 /// Data received through a mux, along with the tag if any.
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct TaggedData<'a> {
     /// Data received, borrowed from the `Mux`.
     pub data: &'a [u8],
