@@ -442,11 +442,9 @@ mod test {
             let mut finished = false;
             while !finished {
                 async {
-                    if !finished {
-                        let status = child.status().await?;
-                        assert!(status.success());
-                        finished = true;
-                    }
+                    let status = child.status().await?;
+                    assert!(status.success());
+                    finished = true;
                     Ok::<(), std::io::Error>(())
                 }.or(async {
                     let data = mux.read().await?;
