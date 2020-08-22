@@ -48,6 +48,18 @@ loop {
 # }
 ```
 
+# async
+
+If you enable the `async` feature, `io-mux` additionally provides an `AsyncMux` type, which allows
+processing data asynchronously.
+
+You may want to use this with [async-process](https://crates.io/crates/async-process) or
+[async-pidfd](https://crates.io/crates/async-pidfd) to concurrently wait on the exit of a process
+and the muxed output and error of that process. Until the process exits, call `AsyncMux::read()` to
+get the next bit of output, awaiting that concurrently with the exit of the process. Once the
+process exits and will thus produce no further output, call `AsyncMux::read_nonblock` until it
+returns `None` to drain the remaining output out of the mux.
+
 # Internals
 
 Internally, `Mux` creates a UNIX datagram socket for the receive end, and a separate UNIX datagram
@@ -98,6 +110,9 @@ use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::net::{SocketAddr, UnixDatagram};
 use std::path::Path;
 use std::process::Stdio;
+
+#[cfg(feature = "async")]
+use async_io::Async;
 
 const DEFAULT_BUF_SIZE: usize = 8192;
 
@@ -271,6 +286,66 @@ impl Mux {
     }
 }
 
+/// Asynchronous version of `Mux`.
+#[cfg(feature = "async")]
+pub struct AsyncMux(Async<Mux>);
+
+#[cfg(feature = "async")]
+impl AsyncMux {
+    /// Create a new `AsyncMux`.
+    ///
+    /// This will create a temporary directory for all the sockets managed by this `AsyncMux`;
+    /// dropping the `AsyncMux` removes the temporary directory.
+    pub fn new() -> io::Result<Self> {
+        Ok(Self(Async::new(Mux::new()?)?))
+    }
+
+    /// Create a new `AsyncMux`, with temporary directory under the specified path.
+    ///
+    /// This will create a temporary directory for all the sockets managed by this `AsyncMux`;
+    /// dropping the `AsyncMux` removes the temporary directory.
+    pub fn new_in<P: AsRef<Path>>(dir: P) -> io::Result<Self> {
+        Ok(Self(Async::new(Mux::new_in(dir)?)?))
+    }
+
+    /// Create a new `MuxSender` with no tag. Data sent via this `MuxSender` will arrive with a tag
+    /// of `None`.
+    pub fn make_untagged_sender(&self) -> io::Result<MuxSender> {
+        self.0.get_ref().make_untagged_sender()
+    }
+
+    /// Create a new `MuxSender` with the specified `tag`. Data sent via this `MuxSender` will
+    /// arrive with a tag of `Some(tag)`.
+    pub fn make_tagged_sender(&self, tag: &str) -> io::Result<MuxSender> {
+        self.0.get_ref().make_tagged_sender(tag)
+    }
+
+    /// Return the next chunk of data, together with its tag.
+    ///
+    /// This reuses a buffer managed by the `AsyncMux`.
+    ///
+    /// Note that this provides no "EOF" indication; if no further data arrives, it will block
+    /// forever. Avoid calling it after the source of the data exits. Once the source of the data
+    /// exits, call `read_nonblock` instead, until it returns None.
+    pub async fn read<'mux>(&'mux mut self) -> io::Result<TaggedData<'mux>> {
+        self.0.readable().await?;
+        self.0.get_mut().read()
+    }
+
+    /// Return the next chunk of data, together with its tag, if available immediately, or None if
+    /// the read would block.
+    ///
+    /// This reuses a buffer managed by the `AsyncMux`.
+    ///
+    /// Use this if you know no more data will get sent and you want to drain the remaining data.
+    pub fn read_nonblock<'mux>(&'mux mut self) -> io::Result<Option<TaggedData<'mux>>> {
+        match self.0.get_mut().read() {
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(None),
+            ret => ret.map(Some),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::Mux;
@@ -341,5 +416,54 @@ mod test {
         let result = mux.make_tagged_sender("a/b");
         assert!(result.is_err());
         Ok(())
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn test_async() -> std::io::Result<()> {
+        use super::AsyncMux;
+        use futures_lite::{FutureExt, future};
+
+        future::block_on(async {
+            let mut mux = AsyncMux::new()?;
+            let mut child = async_process::Command::new("sh")
+                .arg("-c")
+                .arg("echo out1 && echo err1 1>&2 && echo out2 && echo err2 1>&2")
+                .stdout(mux.make_untagged_sender()?)
+                .stderr(mux.make_tagged_sender("e")?)
+                .spawn()?;
+            let mut expected = vec![
+                (None, b"out1\n"),
+                (Some("e"), b"err1\n"),
+                (None, b"out2\n"),
+                (Some("e"), b"err2\n"),
+            ];
+            let mut expected = expected.drain(..);
+            let mut finished = false;
+            while !finished {
+                let passed = async {
+                    if !finished {
+                        let status = child.status().await?;
+                        assert!(status.success());
+                        finished = true;
+                    }
+                    Ok::<bool, std::io::Error>(true)
+                }.or(async {
+                    let data = mux.read().await?;
+                    let (expected_tag, expected_data) = expected.next().unwrap();
+                    assert_eq!(data.tag.as_deref(), expected_tag);
+                    assert_eq!(data.data, expected_data);
+                    Ok(true)
+                }).await?;
+                assert!(passed);
+            }
+            while let Some(data) = mux.read_nonblock()? {
+                let (expected_tag, expected_data) = expected.next().unwrap();
+                assert_eq!(data.tag.as_deref(), expected_tag);
+                assert_eq!(data.data, expected_data);
+            }
+            assert_eq!(expected.next(), None);
+            Ok(())
+        })
     }
 }

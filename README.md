@@ -10,6 +10,20 @@ stderr.
 
 [Documentation](https://docs.rs/io-mux)
 
+## async
+
+If you enable the `async` feature, `io-mux` additionally provides an `AsyncMux`
+type, which allows processing data asynchronously.
+
+You may want to use this with
+[async-process](https://crates.io/crates/async-process) or
+[async-pidfd](https://crates.io/crates/async-pidfd) to concurrently wait on the
+exit of a process and the muxed output and error of that process. Until the
+process exits, call `AsyncMux::read()` to get the next bit of output, awaiting
+that concurrently with the exit of the process. Once the process exits and will
+thus produce no further output, call `AsyncMux::read_nonblock` until it returns
+`None` to drain the remaining output out of the mux.
+
 ## Portability
 
 `io-mux` uses UNIX sockets, so it only runs on UNIX platforms. Support for

@@ -10,10 +10,17 @@ edition = "2018"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+async-io = { version = "0.1.11", optional = true }
 libc = "0.2.66"
 tempfile = "3.1"
 
+[dev-dependencies]
+async-process = "0.1.1"
+futures-lite = "0.1.11"
+
 [features]
+# Enable the AsyncMux type
+async = ["async-io"]
 # Support building on non-Linux targets. See the portability notes in the
 # documentation before enabling this.
 experimental-unix-support = []
