@@ -441,21 +441,20 @@ mod test {
             let mut expected = expected.drain(..);
             let mut finished = false;
             while !finished {
-                let passed = async {
+                async {
                     if !finished {
                         let status = child.status().await?;
                         assert!(status.success());
                         finished = true;
                     }
-                    Ok::<bool, std::io::Error>(true)
+                    Ok::<(), std::io::Error>(())
                 }.or(async {
                     let data = mux.read().await?;
                     let (expected_tag, expected_data) = expected.next().unwrap();
                     assert_eq!(data.tag.as_deref(), expected_tag);
                     assert_eq!(data.data, expected_data);
-                    Ok(true)
+                    Ok(())
                 }).await?;
-                assert!(passed);
             }
             while let Some(data) = mux.read_nonblock()? {
                 let (expected_tag, expected_data) = expected.next().unwrap();
