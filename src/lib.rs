@@ -439,12 +439,10 @@ mod test {
                 (Some("e"), b"err2\n"),
             ];
             let mut expected = expected.drain(..);
-            let mut finished = false;
-            while !finished {
+            let mut status = None;
+            while status.is_none() {
                 async {
-                    let status = child.status().await?;
-                    assert!(status.success());
-                    finished = true;
+                    status = Some(child.status().await?);
                     Ok::<(), std::io::Error>(())
                 }.or(async {
                     let data = mux.read().await?;
@@ -459,6 +457,7 @@ mod test {
                 assert_eq!(data.tag.as_deref(), expected_tag);
                 assert_eq!(data.data, expected_data);
             }
+            assert!(status.unwrap().success());
             assert_eq!(expected.next(), None);
             Ok(())
         })
