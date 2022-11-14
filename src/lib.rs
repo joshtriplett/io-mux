@@ -81,7 +81,7 @@ process producing output.
 
 # Portability
 Mux can theoretically run on any UNIX system. However, on some non-Linux systems, when the buffers
-for a UNIX socket fill up, witing to the UNIX socket may return an `ENOBUFS` error rather than
+for a UNIX socket fill up, writing to the UNIX socket may return an `ENOBUFS` error rather than
 blocking. Thus, on non-Linux systems, the process writing to a `MuxSender` may encounter an error
 if the receiving process does not process its buffers quickly enough. This does not match the
 behavior of a pipe. As this may result in surprising behavior, by default io-mux does not compile
