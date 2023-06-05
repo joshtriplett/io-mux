@@ -8,6 +8,9 @@ collect stdout and stderr from a process, and highlight any error output from
 stderr, while preserving the relative order of data across both stdout and
 stderr.
 
+Note that reading provides no "EOF" indication; if no further data arrives, it
+will block forever. Avoid reading after the source of the data exits.
+
 [Documentation](https://docs.rs/io-mux)
 
 ## async
