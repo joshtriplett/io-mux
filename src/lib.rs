@@ -146,7 +146,7 @@ impl AsRawFd for Mux {
 }
 
 /// A send end of a `Mux`. You can convert a `MuxSender` to a `std::process::Stdio` for use with a
-/// child process, obtain the underlying file descriptor using `IntoRawFd`, or send data using
+/// child process, obtain the underlying file descriptor as an `OwnedFd`, or send data using
 /// `std::io::Write`.
 pub struct MuxSender(UnixDatagram);
 
