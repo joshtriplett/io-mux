@@ -26,3 +26,6 @@ async = ["async-io"]
 experimental-unix-support = []
 # Test the portable code path on Linux, to confirm that it compiles and runs.
 test-portable = []
+
+[package.metadata.docs.rs]
+features = ["async"]
