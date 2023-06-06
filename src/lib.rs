@@ -109,7 +109,8 @@ and potential caveats, before enabling io-mux's experimental UNIX support.");
 
 use std::io;
 use std::net::Shutdown;
-use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::os::unix::io::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::net::{SocketAddr, UnixDatagram};
 use std::path::Path;
 use std::process::Stdio;
@@ -153,9 +154,21 @@ impl IntoRawFd for MuxSender {
     }
 }
 
+impl AsFd for MuxSender {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+}
+
+impl From<MuxSender> for OwnedFd {
+    fn from(sender: MuxSender) -> OwnedFd {
+        sender.0.into()
+    }
+}
+
 impl From<MuxSender> for Stdio {
     fn from(sender: MuxSender) -> Stdio {
-        unsafe { Stdio::from_raw_fd(sender.0.into_raw_fd()) }
+        Stdio::from(OwnedFd::from(sender))
     }
 }
 
