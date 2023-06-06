@@ -102,10 +102,16 @@ platform as non-experimental.
 #[cfg(not(unix))]
 compile_error!("io-mux only runs on UNIX");
 
-#[cfg(all(unix, not(target_os = "linux"), not(feature = "experimental-unix-support")))]
-compile_error!("io-mux support for non-Linux platforms is experimental.
+#[cfg(all(
+    unix,
+    not(target_os = "linux"),
+    not(feature = "experimental-unix-support")
+))]
+compile_error!(
+    "io-mux support for non-Linux platforms is experimental.
 Please read the portability note in the io-mux documentation for more information
-and potential caveats, before enabling io-mux's experimental UNIX support.");
+and potential caveats, before enabling io-mux's experimental UNIX support."
+);
 
 use std::io;
 use std::net::Shutdown;
@@ -438,7 +444,7 @@ mod test {
     #[test]
     fn test_async() -> std::io::Result<()> {
         use super::AsyncMux;
-        use futures_lite::{FutureExt, future};
+        use futures_lite::{future, FutureExt};
 
         future::block_on(async {
             let mut mux = AsyncMux::new()?;
@@ -460,13 +466,15 @@ mod test {
                 async {
                     status = Some(child.status().await?);
                     Ok::<(), std::io::Error>(())
-                }.or(async {
+                }
+                .or(async {
                     let data = mux.read().await?;
                     let (expected_tag, expected_data) = expected.next().unwrap();
                     assert_eq!(data.tag.as_deref(), expected_tag);
                     assert_eq!(data.data, expected_data);
                     Ok(())
-                }).await?;
+                })
+                .await?;
             }
             while let Some(data) = mux.read_nonblock()? {
                 let (expected_tag, expected_data) = expected.next().unwrap();
