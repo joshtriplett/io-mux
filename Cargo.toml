@@ -11,7 +11,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 async-io = { version = "1.2", optional = true }
-libc = "0.2.66"
+rustix = { version = "0.37.19", features = ["net"] }
 tempfile = "3.1"
 
 [dev-dependencies]

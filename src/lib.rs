@@ -1,4 +1,5 @@
 #![forbid(missing_docs)]
+#![forbid(unsafe_code)]
 /*!
 A Mux provides a single receive end and multiple send ends. Data sent to any of the send ends comes
 out the receive end, in order, tagged by the sender.
@@ -123,6 +124,7 @@ use std::process::Stdio;
 
 #[cfg(feature = "async")]
 use async_io::Async;
+use rustix::net::RecvFlags;
 
 const DEFAULT_BUF_SIZE: usize = 8192;
 
@@ -197,15 +199,6 @@ pub struct TaggedData<'a> {
     pub tag: Option<String>,
 }
 
-/// Helper function to call recv on the receive socket and handle errors.
-fn recv(fd: &mut UnixDatagram, buf: &mut [u8], flags: i32) -> io::Result<usize> {
-    let ret = unsafe { libc::recv(fd.as_raw_fd(), buf.as_mut_ptr() as *mut _, buf.len(), flags) };
-    if ret == -1 {
-        return Err(io::Error::last_os_error());
-    };
-    Ok(ret as usize)
-}
-
 impl Mux {
     /// Create a new `Mux`.
     ///
@@ -268,7 +261,11 @@ impl Mux {
 
     #[cfg(all(target_os = "linux", not(feature = "test-portable")))]
     fn recv_from_full<'mux>(&'mux mut self) -> io::Result<(&'mux [u8], SocketAddr)> {
-        let next_packet_len = recv(&mut self.receive, &mut [], libc::MSG_PEEK | libc::MSG_TRUNC)?;
+        let next_packet_len = rustix::net::recv(
+            &mut self.receive,
+            &mut [],
+            RecvFlags::PEEK | RecvFlags::TRUNC,
+        )?;
         if next_packet_len > self.buf.len() {
             self.buf.resize(next_packet_len, 0);
         }
@@ -279,7 +276,7 @@ impl Mux {
     #[cfg(not(all(target_os = "linux", not(feature = "test-portable"))))]
     fn recv_from_full<'mux>(&'mux mut self) -> io::Result<(&'mux [u8], SocketAddr)> {
         loop {
-            let bytes = recv(&mut self.receive, &mut self.buf, libc::MSG_PEEK)?;
+            let bytes = rustix::net::recv(&mut self.receive, &mut self.buf, RecvFlags::PEEK)?;
             // If we filled the buffer, we may have truncated output. Retry with a bigger buffer.
             if bytes == self.buf.len() {
                 let new_len = self.buf.len().saturating_mul(2);
