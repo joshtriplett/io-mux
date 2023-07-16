@@ -16,16 +16,19 @@ will block forever. Avoid reading after the source of the data exits.
 ```
 # use std::io::Write;
 # fn main() -> std::io::Result<()> {
-let mut mux = io_mux::Mux::new()?;
+use io_mux::{Mux, TaggedData};
+let mut mux = Mux::new()?;
 
+let (out_tag, out_sender) = mux.make_sender()?;
+let (err_tag, err_sender) = mux.make_sender()?;
 let mut child = std::process::Command::new("sh")
     .arg("-c")
     .arg("echo out1 && echo err1 1>&2 && echo out2")
-    .stdout(mux.make_untagged_sender()?)
-    .stderr(mux.make_tagged_sender("e")?)
+    .stdout(out_sender)
+    .stderr(err_sender)
     .spawn()?;
 
-let mut done_sender = mux.make_tagged_sender("d")?;
+let (done_tag, mut done_sender) = mux.make_sender()?;
 std::thread::spawn(move || match child.wait() {
     Ok(status) if status.success() => {
         let _ = write!(done_sender, "Done\n");
@@ -38,15 +41,19 @@ std::thread::spawn(move || match child.wait() {
     }
 });
 
-loop {
-    let tagged_data = mux.read()?;
-    if let Some(tag) = tagged_data.tag {
-        print!("{}: ", tag);
-        if tag == "d" {
-            break;
-        }
+let mut done = false;
+while !done {
+    let TaggedData { data, tag } = mux.read()?;
+    if tag == out_tag {
+        print!("out: ");
+    } else if tag == err_tag {
+        print!("err: ");
+    } else if tag == done_tag {
+        done = true;
+    } else {
+        panic!("Unexpected tag");
     }
-    std::io::stdout().write_all(tagged_data.data)?;
+    std::io::stdout().write_all(data)?;
 }
 #     Ok(())
 # }
@@ -117,6 +124,8 @@ and potential caveats, before enabling io-mux's experimental UNIX support."
 use std::io;
 use std::net::Shutdown;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+#[cfg(target_os = "linux")]
+use std::os::linux::net::SocketAddrExt;
 use std::os::unix::io::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::net::{SocketAddr, UnixDatagram};
 use std::path::Path;
@@ -190,13 +199,32 @@ impl io::Write for MuxSender {
     }
 }
 
-/// Data received through a mux, along with the tag if any.
+/// A unique tag associated with a sender.
+#[derive(Clone, Debug)]
+pub struct Tag(SocketAddr);
+
+impl PartialEq<Tag> for Tag {
+    fn eq(&self, rhs: &Tag) -> bool {
+        #[cfg(target_os = "linux")]
+        if let (Some(lhs), Some(rhs)) = (self.0.as_abstract_name(), rhs.0.as_abstract_name()) {
+            return lhs == rhs;
+        }
+        if let (Some(lhs), Some(rhs)) = (self.0.as_pathname(), rhs.0.as_pathname()) {
+            return lhs == rhs;
+        }
+        return self.0.is_unnamed() && rhs.0.is_unnamed();
+    }
+}
+
+impl Eq for Tag {}
+
+/// Data received through a mux, along with the tag.
 #[derive(Debug, Eq, PartialEq)]
 pub struct TaggedData<'a> {
     /// Data received, borrowed from the `Mux`.
     pub data: &'a [u8],
     /// Tag for the sender of this data.
-    pub tag: Option<String>,
+    pub tag: Tag,
 }
 
 impl Mux {
@@ -217,7 +245,6 @@ impl Mux {
     }
 
     fn new_with_tempdir(tempdir: tempfile::TempDir) -> io::Result<Self> {
-        std::fs::create_dir(tempdir.path().join("s"))?;
         let receive_path = tempdir.path().join("r");
         let receive = UnixDatagram::bind(&receive_path)?;
 
@@ -233,30 +260,28 @@ impl Mux {
         })
     }
 
-    fn config_sender(&self, sender: UnixDatagram) -> io::Result<MuxSender> {
-        let receive_path = self.tempdir.path().join("r");
-        sender.connect(&receive_path)?;
-        sender.shutdown(Shutdown::Read)?;
-        Ok(MuxSender(sender))
-    }
-
-    /// Create a new `MuxSender` with no tag. Data sent via this `MuxSender` will arrive with a tag
-    /// of `None`.
-    pub fn make_untagged_sender(&self) -> io::Result<MuxSender> {
-        self.config_sender(UnixDatagram::unbound()?)
-    }
-
-    /// Create a new `MuxSender` with the specified `tag`. Data sent via this `MuxSender` will
-    /// arrive with a tag of `Some(tag)`.
-    pub fn make_tagged_sender(&self, tag: &str) -> io::Result<MuxSender> {
-        if tag.contains(std::path::is_separator) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Tag must not contain path separator",
-            ));
+    /// Create a new `MuxSender` and associated unique `Tag`. Data sent via the returned
+    /// `MuxSender` will arrive with the corresponding `Tag`.
+    pub fn make_sender(&self) -> io::Result<(Tag, MuxSender)> {
+        // It should be incredibly unlikely to have collisions, but avoid looping forever in case
+        // something strange is going on (e.g. weird seccomp filter).
+        for _ in 0..32768 {
+            let n = fastrand::u128(..);
+            let sender_addr =
+                SocketAddr::from_pathname(&self.tempdir.path().join(format!("{n:x}")))?;
+            let sender = match UnixDatagram::bind_addr(&sender_addr) {
+                Err(e) if e.kind() == io::ErrorKind::AddrInUse => continue,
+                result => result,
+            }?;
+            let receive_path = self.tempdir.path().join("r");
+            sender.connect(&receive_path)?;
+            sender.shutdown(Shutdown::Read)?;
+            return Ok((Tag(sender_addr), MuxSender(sender)));
         }
-        let sender_path = self.tempdir.path().join("s").join(tag);
-        self.config_sender(UnixDatagram::bind(&sender_path)?)
+        Err(io::Error::new(
+            io::ErrorKind::AddrInUse,
+            "couldn't create unique socket name",
+        ))
     }
 
     #[cfg(all(target_os = "linux", not(feature = "test-portable")))]
@@ -297,10 +322,7 @@ impl Mux {
     /// forever. Avoid calling it after the source of the data exits.
     pub fn read<'mux>(&'mux mut self) -> io::Result<TaggedData<'mux>> {
         let (data, addr) = self.recv_from_full()?;
-        let tag = addr
-            .as_pathname()
-            .and_then(Path::file_name)
-            .map(|s| s.to_string_lossy().into_owned());
+        let tag = Tag(addr);
         Ok(TaggedData { data, tag })
     }
 }
@@ -327,16 +349,10 @@ impl AsyncMux {
         Ok(Self(Async::new(Mux::new_in(dir)?)?))
     }
 
-    /// Create a new `MuxSender` with no tag. Data sent via this `MuxSender` will arrive with a tag
-    /// of `None`.
-    pub fn make_untagged_sender(&self) -> io::Result<MuxSender> {
-        self.0.get_ref().make_untagged_sender()
-    }
-
-    /// Create a new `MuxSender` with the specified `tag`. Data sent via this `MuxSender` will
-    /// arrive with a tag of `Some(tag)`.
-    pub fn make_tagged_sender(&self, tag: &str) -> io::Result<MuxSender> {
-        self.0.get_ref().make_tagged_sender(tag)
+    /// Create a new `MuxSender` and associated unique `Tag`. Data sent via the returned
+    /// `MuxSender` will arrive with the corresponding `Tag`.
+    pub fn make_sender(&self) -> io::Result<(Tag, MuxSender)> {
+        self.0.get_ref().make_sender()
     }
 
     /// Return the next chunk of data, together with its tag.
@@ -387,14 +403,16 @@ mod test {
     }
 
     fn test_with_mux(mut mux: Mux) -> std::io::Result<()> {
+        let (out_tag, out_sender) = mux.make_sender()?;
+        let (err_tag, err_sender) = mux.make_sender()?;
         let mut child = std::process::Command::new("sh")
             .arg("-c")
             .arg("echo out1 && echo err1 1>&2 && echo out2 && echo err2 1>&2")
-            .stdout(mux.make_untagged_sender()?)
-            .stderr(mux.make_tagged_sender("e")?)
+            .stdout(out_sender)
+            .stderr(err_sender)
             .spawn()?;
 
-        let mut done_sender = mux.make_tagged_sender("d")?;
+        let (done_tag, mut done_sender) = mux.make_sender()?;
         std::thread::spawn(move || {
             use std::io::Write;
             match child.wait() {
@@ -411,29 +429,21 @@ mod test {
         });
 
         let data1 = mux.read()?;
-        assert!(data1.tag.is_none());
+        assert_eq!(data1.tag, out_tag);
         assert_eq!(data1.data, b"out1\n");
         let data2 = mux.read()?;
-        assert_eq!(data2.tag.as_deref(), Some("e"));
+        assert_eq!(data2.tag, err_tag);
         assert_eq!(data2.data, b"err1\n");
         let data3 = mux.read()?;
-        assert!(data3.tag.is_none());
+        assert_eq!(data3.tag, out_tag);
         assert_eq!(data3.data, b"out2\n");
         let data4 = mux.read()?;
-        assert_eq!(data4.tag.as_deref(), Some("e"));
+        assert_eq!(data4.tag, err_tag);
         assert_eq!(data4.data, b"err2\n");
         let done = mux.read()?;
-        assert_eq!(done.tag.as_deref(), Some("d"));
+        assert_eq!(done.tag, done_tag);
         assert_eq!(done.data, b"Done\n");
 
-        Ok(())
-    }
-
-    #[test]
-    fn test_path_separator() -> std::io::Result<()> {
-        let mux = Mux::new()?;
-        let result = mux.make_tagged_sender("a/b");
-        assert!(result.is_err());
         Ok(())
     }
 
@@ -445,17 +455,19 @@ mod test {
 
         future::block_on(async {
             let mut mux = AsyncMux::new()?;
+            let (out_tag, out_sender) = mux.make_sender()?;
+            let (err_tag, err_sender) = mux.make_sender()?;
             let mut child = async_process::Command::new("sh")
                 .arg("-c")
                 .arg("echo out1 && echo err1 1>&2 && echo out2 && echo err2 1>&2")
-                .stdout(mux.make_untagged_sender()?)
-                .stderr(mux.make_tagged_sender("e")?)
+                .stdout(out_sender)
+                .stderr(err_sender)
                 .spawn()?;
             let mut expected = vec![
-                (None, b"out1\n"),
-                (Some("e"), b"err1\n"),
-                (None, b"out2\n"),
-                (Some("e"), b"err2\n"),
+                (out_tag.clone(), b"out1\n"),
+                (err_tag.clone(), b"err1\n"),
+                (out_tag, b"out2\n"),
+                (err_tag, b"err2\n"),
             ];
             let mut expected = expected.drain(..);
             let mut status = None;
@@ -467,7 +479,7 @@ mod test {
                 .or(async {
                     let data = mux.read().await?;
                     let (expected_tag, expected_data) = expected.next().unwrap();
-                    assert_eq!(data.tag.as_deref(), expected_tag);
+                    assert_eq!(data.tag, expected_tag);
                     assert_eq!(data.data, expected_data);
                     Ok(())
                 })
@@ -475,7 +487,7 @@ mod test {
             }
             while let Some(data) = mux.read_nonblock()? {
                 let (expected_tag, expected_data) = expected.next().unwrap();
-                assert_eq!(data.tag.as_deref(), expected_tag);
+                assert_eq!(data.tag, expected_tag);
                 assert_eq!(data.data, expected_data);
             }
             assert!(status.unwrap().success());

@@ -1,6 +1,6 @@
 [package]
 name = "io-mux"
-version = "1.5.0"
+version = "2.0.0"
 authors = ["Josh Triplett <josh@joshtriplett.org>"]
 description = "Provide multiple file descriptors writing into one in-order pipe, tagged by the source of data (e.g. stdout/stderr)"
 keywords = ["log", "pipe", "stdout", "stderr"]
@@ -11,6 +11,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 async-io = { version = "1.2", optional = true }
+fastrand = "1.9.0"
 rustix = { version = "0.37.19", features = ["net"] }
 tempfile = "3.1"
 
