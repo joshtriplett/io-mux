@@ -144,7 +144,8 @@ const DEFAULT_BUF_SIZE: usize = 8192;
 /// Always use `Mux` to perform the actual read.
 pub struct Mux {
     receive: UnixDatagram,
-    tempdir: tempfile::TempDir,
+    receive_addr: SocketAddr,
+    tempdir: Option<tempfile::TempDir>,
     buf: Vec<u8>,
 }
 
@@ -228,6 +229,26 @@ pub struct TaggedData<'a> {
 }
 
 impl Mux {
+    /// Create a new `Mux`, using Linux abstract sockets.
+    #[cfg(target_os = "linux")]
+    pub fn new_abstract() -> io::Result<Self> {
+        // It should be incredibly unlikely to have a collision, so if we have multiple in a row,
+        // something strange is likely going on, and we might continue to get the same error
+        // indefinitely. Bail after a large number of retries, so that we don't loop forever.
+        for _ in 0..32768 {
+            let receive_addr =
+                SocketAddr::from_abstract_name(format!("io-mux-{:x}", fastrand::u128(..)))?;
+            match Self::new_with_addr(receive_addr, None) {
+                Err(e) if e.kind() == io::ErrorKind::AddrInUse => continue,
+                result => return result,
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::AddrInUse,
+            "couldn't create unique socket name",
+        ))
+    }
+
     /// Create a new `Mux`.
     ///
     /// This will create a temporary directory for all the sockets managed by this `Mux`; dropping
@@ -245,8 +266,15 @@ impl Mux {
     }
 
     fn new_with_tempdir(tempdir: tempfile::TempDir) -> io::Result<Self> {
-        let receive_path = tempdir.path().join("r");
-        let receive = UnixDatagram::bind(&receive_path)?;
+        let receive_addr = SocketAddr::from_pathname(tempdir.path().join("r"))?;
+        Self::new_with_addr(receive_addr, Some(tempdir))
+    }
+
+    fn new_with_addr(
+        receive_addr: SocketAddr,
+        tempdir: Option<tempfile::TempDir>,
+    ) -> io::Result<Self> {
+        let receive = UnixDatagram::bind_addr(&receive_addr)?;
 
         // Shutdown writing to the receive socket, to help catch possible errors. On some targets,
         // this generates spurious errors, such as `Socket is not connected` on FreeBSD. We don't
@@ -255,6 +283,7 @@ impl Mux {
 
         Ok(Mux {
             receive,
+            receive_addr,
             tempdir,
             buf: vec![0; DEFAULT_BUF_SIZE],
         })
@@ -263,18 +292,33 @@ impl Mux {
     /// Create a new `MuxSender` and associated unique `Tag`. Data sent via the returned
     /// `MuxSender` will arrive with the corresponding `Tag`.
     pub fn make_sender(&self) -> io::Result<(Tag, MuxSender)> {
+        if let Some(ref tempdir) = self.tempdir {
+            self.make_sender_with_retry(|n| {
+                SocketAddr::from_pathname(tempdir.path().join(format!("{n:x}")))
+            })
+        } else {
+            #[cfg(target_os = "linux")]
+            return self.make_sender_with_retry(|n| {
+                SocketAddr::from_abstract_name(format!("io-mux-send-{n:x}"))
+            });
+            #[cfg(not(target_os = "linux"))]
+            panic!("Mux without tempdir on non-Linux platform")
+        }
+    }
+
+    fn make_sender_with_retry(
+        &self,
+        make_sender_addr: impl Fn(u128) -> io::Result<SocketAddr>,
+    ) -> io::Result<(Tag, MuxSender)> {
         // It should be incredibly unlikely to have collisions, but avoid looping forever in case
         // something strange is going on (e.g. weird seccomp filter).
         for _ in 0..32768 {
-            let n = fastrand::u128(..);
-            let sender_addr =
-                SocketAddr::from_pathname(&self.tempdir.path().join(format!("{n:x}")))?;
+            let sender_addr = make_sender_addr(fastrand::u128(..))?;
             let sender = match UnixDatagram::bind_addr(&sender_addr) {
                 Err(e) if e.kind() == io::ErrorKind::AddrInUse => continue,
                 result => result,
             }?;
-            let receive_path = self.tempdir.path().join("r");
-            sender.connect(&receive_path)?;
+            sender.connect_addr(&self.receive_addr)?;
             sender.shutdown(Shutdown::Read)?;
             return Ok((Tag(sender_addr), MuxSender(sender)));
         }
@@ -400,6 +444,12 @@ mod test {
         let mux = Mux::new_in(dir.path())?;
         assert_eq!(dir_entries()?, 1);
         test_with_mux(mux)
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_abstract() -> std::io::Result<()> {
+        test_with_mux(Mux::new_abstract()?)
     }
 
     fn test_with_mux(mut mux: Mux) -> std::io::Result<()> {
