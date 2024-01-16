@@ -377,6 +377,12 @@ pub struct AsyncMux(Async<Mux>);
 
 #[cfg(feature = "async")]
 impl AsyncMux {
+    /// Create a new `Mux`, using Linux abstract sockets.
+    #[cfg(target_os = "linux")]
+    pub fn new_abstract() -> io::Result<Self> {
+        Ok(Self(Async::new(Mux::new_abstract()?)?))
+    }
+
     /// Create a new `AsyncMux`.
     ///
     /// This will create a temporary directory for all the sockets managed by this `AsyncMux`;
@@ -427,6 +433,8 @@ impl AsyncMux {
 
 #[cfg(test)]
 mod test {
+    #[cfg(feature = "async")]
+    use super::AsyncMux;
     use super::Mux;
 
     #[test]
@@ -498,13 +506,10 @@ mod test {
     }
 
     #[cfg(feature = "async")]
-    #[test]
-    fn test_async() -> std::io::Result<()> {
-        use super::AsyncMux;
+    fn test_with_async_mux(mut mux: AsyncMux) -> std::io::Result<()> {
         use futures_lite::{future, FutureExt};
 
         future::block_on(async {
-            let mut mux = AsyncMux::new()?;
             let (out_tag, out_sender) = mux.make_sender()?;
             let (err_tag, err_sender) = mux.make_sender()?;
             let mut child = async_process::Command::new("sh")
@@ -544,5 +549,17 @@ mod test {
             assert_eq!(expected.next(), None);
             Ok(())
         })
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn test_async() -> std::io::Result<()> {
+        test_with_async_mux(AsyncMux::new()?)
+    }
+
+    #[cfg(all(feature = "async", target_os = "linux"))]
+    #[test]
+    fn test_abstract_async() -> std::io::Result<()> {
+        test_with_async_mux(AsyncMux::new_abstract()?)
     }
 }
