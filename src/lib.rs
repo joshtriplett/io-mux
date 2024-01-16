@@ -1,5 +1,4 @@
 #![forbid(missing_docs)]
-#![forbid(unsafe_code)]
 /*!
 A Mux provides a single receive end and multiple send ends. Data sent to any of the send ends comes
 out the receive end, in order, tagged by the sender.
@@ -140,13 +139,19 @@ const DEFAULT_BUF_SIZE: usize = 8192;
 /// A `Mux` provides a single receive end and multiple send ends. Data sent to any of the send ends
 /// comes out the receive end, in order, tagged by the sender.
 ///
-/// `Mux` implements `AsRawFd` solely to support polling the underlying `RawFd` for data to read.
-/// Always use `Mux` to perform the actual read.
+/// `Mux` implements `AsFd` solely to support polling the underlying file descriptor for data to
+/// read. Always use `Mux` to perform the actual read.
 pub struct Mux {
     receive: UnixDatagram,
     receive_addr: SocketAddr,
     tempdir: Option<tempfile::TempDir>,
     buf: Vec<u8>,
+}
+
+impl AsFd for Mux {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.receive.as_fd()
+    }
 }
 
 impl AsRawFd for Mux {
@@ -414,7 +419,8 @@ impl AsyncMux {
     /// exits, call `read_nonblock` instead, until it returns None.
     pub async fn read<'mux>(&'mux mut self) -> io::Result<TaggedData<'mux>> {
         self.0.readable().await?;
-        self.0.get_mut().read()
+        let m = unsafe { self.0.get_mut() };
+        m.read()
     }
 
     /// Return the next chunk of data, together with its tag, if available immediately, or None if
@@ -424,7 +430,8 @@ impl AsyncMux {
     ///
     /// Use this if you know no more data will get sent and you want to drain the remaining data.
     pub fn read_nonblock<'mux>(&'mux mut self) -> io::Result<Option<TaggedData<'mux>>> {
-        match self.0.get_mut().read() {
+        let m = unsafe { self.0.get_mut() };
+        match m.read() {
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(None),
             ret => ret.map(Some),
         }
