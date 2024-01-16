@@ -1,6 +1,6 @@
 [package]
 name = "io-mux"
-version = "2.1.0"
+version = "2.1.1"
 authors = ["Josh Triplett <josh@joshtriplett.org>"]
 description = "Provide multiple file descriptors writing into one in-order pipe, tagged by the source of data (e.g. stdout/stderr)"
 keywords = ["log", "pipe", "stdout", "stderr"]
