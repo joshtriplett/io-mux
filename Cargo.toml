@@ -11,13 +11,13 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 async-io = { version = "1.13", optional = true }
-fastrand = "2.0.0"
+fastrand = "2.0.1"
 rustix = { version = "0.38", features = ["net"] }
-tempfile = "3.6"
+tempfile = "3.9"
 
 [dev-dependencies]
-async-process = "1.7.0"
-futures-lite = "1.13.0"
+async-process = "2.0.1"
+futures-lite = "2.2.0"
 
 [features]
 # Enable the AsyncMux type
