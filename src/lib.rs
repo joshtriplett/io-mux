@@ -218,7 +218,7 @@ impl PartialEq<Tag> for Tag {
         if let (Some(lhs), Some(rhs)) = (self.0.as_pathname(), rhs.0.as_pathname()) {
             return lhs == rhs;
         }
-        return self.0.is_unnamed() && rhs.0.is_unnamed();
+        self.0.is_unnamed() && rhs.0.is_unnamed()
     }
 }
 
