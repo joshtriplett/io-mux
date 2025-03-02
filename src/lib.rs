@@ -334,7 +334,7 @@ impl Mux {
     }
 
     #[cfg(all(target_os = "linux", not(feature = "test-portable")))]
-    fn recv_from_full<'mux>(&'mux mut self) -> io::Result<(&'mux [u8], SocketAddr)> {
+    fn recv_from_full(&mut self) -> io::Result<(&[u8], SocketAddr)> {
         let next_packet_len = rustix::net::recv(
             &mut self.receive,
             &mut [],
@@ -348,7 +348,7 @@ impl Mux {
     }
 
     #[cfg(not(all(target_os = "linux", not(feature = "test-portable"))))]
-    fn recv_from_full<'mux>(&'mux mut self) -> io::Result<(&'mux [u8], SocketAddr)> {
+    fn recv_from_full(&mut self) -> io::Result<(&[u8], SocketAddr)> {
         loop {
             let bytes = rustix::net::recv(&mut self.receive, &mut self.buf, RecvFlags::PEEK)?;
             // If we filled the buffer, we may have truncated output. Retry with a bigger buffer.
@@ -369,7 +369,7 @@ impl Mux {
     ///
     /// Note that this provides no "EOF" indication; if no further data arrives, it will block
     /// forever. Avoid calling it after the source of the data exits.
-    pub fn read<'mux>(&'mux mut self) -> io::Result<TaggedData<'mux>> {
+    pub fn read(&mut self) -> io::Result<TaggedData<'_>> {
         let (data, addr) = self.recv_from_full()?;
         let tag = Tag(addr);
         Ok(TaggedData { data, tag })
@@ -417,7 +417,7 @@ impl AsyncMux {
     /// Note that this provides no "EOF" indication; if no further data arrives, it will block
     /// forever. Avoid calling it after the source of the data exits. Once the source of the data
     /// exits, call `read_nonblock` instead, until it returns None.
-    pub async fn read<'mux>(&'mux mut self) -> io::Result<TaggedData<'mux>> {
+    pub async fn read(&mut self) -> io::Result<TaggedData<'_>> {
         self.0.readable().await?;
         let m = unsafe { self.0.get_mut() };
         m.read()
@@ -429,7 +429,7 @@ impl AsyncMux {
     /// This reuses a buffer managed by the `AsyncMux`.
     ///
     /// Use this if you know no more data will get sent and you want to drain the remaining data.
-    pub fn read_nonblock<'mux>(&'mux mut self) -> io::Result<Option<TaggedData<'mux>>> {
+    pub fn read_nonblock(&mut self) -> io::Result<Option<TaggedData<'_>>> {
         let m = unsafe { self.0.get_mut() };
         match m.read() {
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(None),
