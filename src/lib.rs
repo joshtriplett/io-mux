@@ -514,7 +514,7 @@ mod test {
 
     #[cfg(feature = "async")]
     fn test_with_async_mux(mut mux: AsyncMux) -> std::io::Result<()> {
-        use futures_lite::{future, FutureExt};
+        use futures_lite::{FutureExt, future};
 
         future::block_on(async {
             let (out_tag, out_sender) = mux.make_sender()?;

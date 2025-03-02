@@ -6,7 +6,7 @@ description = "Provide multiple file descriptors writing into one in-order pipe,
 keywords = ["log", "pipe", "stdout", "stderr"]
 categories = ["command-line-interface"]
 repository = "https://github.com/joshtriplett/io-mux"
-edition = "2021"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
