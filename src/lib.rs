@@ -335,9 +335,9 @@ impl Mux {
 
     #[cfg(all(target_os = "linux", not(feature = "test-portable")))]
     fn recv_from_full(&mut self) -> io::Result<(&[u8], SocketAddr)> {
-        let next_packet_len = rustix::net::recv(
+        let (_, next_packet_len) = rustix::net::recv(
             &mut self.receive,
-            &mut [],
+            &mut [0u8; 0],
             RecvFlags::PEEK | RecvFlags::TRUNC,
         )?;
         if next_packet_len > self.buf.len() {
@@ -350,7 +350,7 @@ impl Mux {
     #[cfg(not(all(target_os = "linux", not(feature = "test-portable"))))]
     fn recv_from_full(&mut self) -> io::Result<(&[u8], SocketAddr)> {
         loop {
-            let bytes = rustix::net::recv(&mut self.receive, &mut self.buf, RecvFlags::PEEK)?;
+            let (bytes, _) = rustix::net::recv(&mut self.receive, &mut self.buf, RecvFlags::PEEK)?;
             // If we filled the buffer, we may have truncated output. Retry with a bigger buffer.
             if bytes == self.buf.len() {
                 let new_len = self.buf.len().saturating_mul(2);
