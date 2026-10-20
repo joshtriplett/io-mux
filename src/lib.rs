@@ -482,13 +482,13 @@ mod test {
             use std::io::Write;
             match child.wait() {
                 Ok(status) if status.success() => {
-                    let _ = write!(done_sender, "Done\n");
+                    let _ = writeln!(done_sender, "Done");
                 }
                 Ok(_) => {
-                    let _ = write!(done_sender, "Child process failed\n");
+                    let _ = writeln!(done_sender, "Child process failed");
                 }
                 Err(e) => {
-                    let _ = write!(done_sender, "Error: {:?}\n", e);
+                    let _ = writeln!(done_sender, "Error: {:?}", e);
                 }
             }
         });
